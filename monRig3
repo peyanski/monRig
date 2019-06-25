@@ -9,7 +9,9 @@ T_THRESHOLD="86"              # Send alert if any of the GPUs temperature pass t
 T_BURNING="91"                # Restart Host if any of the GPUs pass this point
 USERNAME="a3"                 # used username for SSH connection
 EMAIL="kirile@icloud.com"     # to which mail to send the alerts
-ALLOWREBOOT="0"               # if 1 then reboot of the rig is allowed when thre                                                                                                                                                             sholds are reached
+ALLOWREBOOT="0"               # if 1 then reboot of the rig is allowed when thre  
+MQTT_TOPIC="RIG3"			  # the MQTT topic for the relay controlling the rig   
+MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server                                                                                                                                                       sholds are reached
 
 # Check if host is alive
 pingtest(){
@@ -20,17 +22,34 @@ pingtest(){
   return 0
 }
 
-if pingtest $HOST ; then
-  # 100% failed ping
-  echo -e "Subject: Server ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
-else
-  # check if the COUNTER_FILE exist
+# check if the COUNTER_FILE exist
   if [[ -r $COUNTER_FILE ]] ; then
      COUNT=$(<$COUNTER_FILE) # get the value from the file
   else
      COUNT=0
   fi
 
+
+if pingtest $HOST ; then
+  # when 100% failed ping send an alert
+  echo -e "Subject: Server ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
+  # Increment counter and save to file
+    COUNT=`expr $COUNT + 1`
+    echo $COUNT > $COUNTER_FILE
+  if (( $COUNT == 3 )) ; then	# if the couner is equal to 3 then stop the relay using mgtt protocol
+      echo -e "Subject: Turn OFF the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
+	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
+	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 0   # OFF
+      sleep 40		# wait for 40sec 
+      echo -e "Subject: Turn ON the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
+	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
+	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 1   # ON
+	  # Reseting counter if all of the hashes are greater than $MH_THRESHOLD
+      COUNT=0
+      echo $COUNT > $COUNTER_FILE
+  fi 
+else	# if the host is alive
+  
   # Switches means follwing: -q = quiet; -O = output; - = standard output/console; -E = use regexp; -o = show only the matching
   getEthMh=$(wget http://$HOST:$PORT -q -O - | grep -Eo "Total Ethereum Hashrate: [0-9.]+ MH\/s" | grep -Eo "[0-9.]+")
   getTemp=$(wget http://$HOST:$PORT -q -O - | grep -Eo "[0-9]+C" | grep -Eo "[0-9]+")
