@@ -1,17 +1,17 @@
 #!/bin/bash
-HOST="10.0.2.3"             # which host to monitor
-PORT="8000"                   # on which port to look for webserver showing mega                                                                                                                                                             hashes
+HOST="10.0.2.3"               # which host to monitor
+PORT="8000"                   # on which port to look for Claymore's EthMon page showing megahashes                                                                                                                                                            hashes
 PING_COUNT=1                  # how many times to ping the host
 COUNTER_FILE=$HOST            # counter file name, same as hostname by default
-MH_THRESHOLD="45"            # Send alert if MH drops below this point
+MH_THRESHOLD="45"             # Send alert if MH drops below this point
 FAN_THRESHOLD="99"            # Send alert if FAN goes above this percentage
 T_THRESHOLD="86"              # Send alert if any of the GPUs temperature pass t                                                                                                                                                             his point
 T_BURNING="91"                # Restart Host if any of the GPUs pass this point
-USERNAME="USER"                 # used username for SSH connection
-EMAIL="email@icloud.com"     # to which mail to send the alerts
-ALLOWREBOOT="0"               # if 1 then reboot of the rig is allowed when thre  
-MQTT_TOPIC="RIG"			  # the MQTT topic for the relay controlling the rig   
-MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server                                                                                                                                                       sholds are reached
+USERNAME="USER"               # used username for SSH connection
+EMAIL="email@icloud.com"      # to which mail to send the alerts
+ALLOWREBOOT="0"               # if 1 then auto reboot of the rig is allowed  
+MQTT_TOPIC="RIG"			  # the MQTT topic for the sonoff relay controlling the rig   
+MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server/broker                                                                                                                                                       sholds are reached
 
 # Check if host is alive
 pingtest(){
