@@ -1,0 +1,135 @@
+#!/bin/bash
+HOST="10.0.2.3"             # which host to monitor
+PORT="8000"                   # on which port to look for webserver showing mega                                                                                                                                                             hashes
+PING_COUNT=1                  # how many times to ping the host
+COUNTER_FILE=$HOST            # counter file name, same as hostname by default
+MH_THRESHOLD="45"            # Send alert if MH drops below this point
+FAN_THRESHOLD="99"            # Send alert if FAN goes above this percentage
+T_THRESHOLD="86"              # Send alert if any of the GPUs temperature pass t                                                                                                                                                             his point
+T_BURNING="91"                # Restart Host if any of the GPUs pass this point
+USERNAME="USER"                 # used username for SSH connection
+EMAIL="email@icloud.com"     # to which mail to send the alerts
+ALLOWREBOOT="0"               # if 1 then reboot of the rig is allowed when thre  
+MQTT_TOPIC="RIG"			  # the MQTT topic for the relay controlling the rig   
+MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server                                                                                                                                                       sholds are reached
+
+# Check if host is alive
+pingtest(){
+  for myHost in "$@"
+  do
+    ping -c "$PING_COUNT" "$myHost" && return 1
+  done
+  return 0
+}
+
+# check if the COUNTER_FILE exist
+  if [[ -r $COUNTER_FILE ]] ; then
+     COUNT=$(<$COUNTER_FILE) # get the value from the file
+  else
+     COUNT=0
+  fi
+
+
+if pingtest $HOST ; then
+  # when 100% failed ping send an alert
+  echo -e "Subject: Server ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
+  # Increment counter and save to file
+    COUNT=`expr $COUNT + 1`
+    echo $COUNT > $COUNTER_FILE
+  if (( $COUNT == 3 )) ; then	# if the couner is equal to 3 then stop the relay using mgtt protocol
+      echo -e "Subject: Turn OFF the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
+	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
+	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 0   # OFF
+      sleep 40		# wait for 40sec 
+      echo -e "Subject: Turn ON the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
+	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
+	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 1   # ON
+	  # Reseting counter if all of the hashes are greater than $MH_THRESHOLD
+      COUNT=0
+      echo $COUNT > $COUNTER_FILE
+  fi 
+else	# if the host is alive
+  
+  # Switches means follwing: -q = quiet; -O = output; - = standard output/console; -E = use regexp; -o = show only the matching
+  getEthMh=$(wget http://$HOST:$PORT -q -O - | grep -Eo "Total Ethereum Hashrate: [0-9.]+ MH\/s" | grep -Eo "[0-9.]+")
+  getTemp=$(wget http://$HOST:$PORT -q -O - | grep -Eo "[0-9]+C" | grep -Eo "[0-9]+")
+  getFan=$(wget http://$HOST:$PORT -q -O - | grep -Eo "[0-9]+C:[0-9]+%" |  grep -Eo "[0-9]+%" | grep -Eo "[0-9]+")
+  echo "Total MH/s: ${getEthMh}"
+  echo "Temperature:"
+  echo "${getTemp}C"
+  echo "Fan Speed:"
+  echo "${getFan}%"
+
+  # GPU Temperature check
+  while read -r line; do tArray+=("$line"); done <<< "$getTemp" # Split string into array.
+  for index in "${!tArray[@]}"
+  do
+    if (( "${tArray[index]}" > $T_THRESHOLD )) ; then
+      echo -e "Subject: Rig ($HOST) - GPU$index OVERHEAT - ${tArray[index]}C!\n\nThreshold is ${T_THRESHOLD}C." | /usr/sbin/ssmtp $EMAIL
+      #IF temperature is extremely high, over $T_BURNING - restart the host
+      if (( "${tArray[index]}" > $T_BURNING )) ; then
+        if [ "$ALLOWREBOOT" = "1" ] ; then
+                 echo -e "Subject: Rig ($HOST) REBOOT - GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
+                # Switches means following: /C = execute command and terminate cmd.exe; /f = force; /t = delayed in seconds; /r = reboot
+                 ssh -i /etc/dropbear/dropbear_rsa_host_key $USERNAME@$HOST 'cmd.exe /C shutdown /f /t 20 /r'i
+        else
+                echo -e "Subject: Rig ($HOST) GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
+        fi
+      fi
+    fi
+  done
+
+  # FAN speed check
+  while read -r lin; do lines+=("$lin"); done <<< "$getFan" # Split string into array.
+  #printf "%s\n" "${lines[@]}"
+  for index in "${!lines[@]}"
+  do
+    if (( "${lines[index]}" > $FAN_THRESHOLD )) ; then
+      echo -e "Subject: Rig ($HOST) - GPU$index FAN - ${lines[index]}%!\n\nThreshold is ${FAN_THRESHOLD}%." | /usr/sbin/ssmtp $EMAIL
+    fi
+  done
+
+
+  # Megahashes check
+  # Because Bash doesn't do floats I will use awk
+  # sendAlarm = 1 if $getEthMh < $MH_THRESHOLD
+  sendAlarm=$(awk 'BEGIN{ print "'$getEthMh'"<"'$MH_THRESHOLD'" }')
+  if [ "$sendAlarm" -eq 1 ] ; then
+
+    # Increment counter and save to file
+    COUNT=`expr $COUNT + 1`
+    echo $COUNT > $COUNTER_FILE
+
+    # check if we need to send alert
+    if [[ $(( $COUNT % 2 )) -eq 0 ]] ; then
+      # We have reached counter = 2 - we need to send alert
+      echo -e "Subject: Rig ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 2 times consequently" | /usr/sbin/ssmtp $EMAIL
+    fi
+
+    # check if we need to reboot the rig
+    if [[ $(( $COUNT % 5 )) -eq 0 ]] ; then
+        if [ "$ALLOWREBOOT" = "1" ] ; then
+                # We have reached counter = 5 - we need to reboot the rig
+                echo -e "Subject: Rig ($HOST) REBOOT - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
+                # Switches means following: /C = execute command and terminate cmd.exe; /f = force; /t = delayed in seconds; /r = reboot
+                ssh -i /etc/dropbear/dropbear_rsa_host_key $USERNAME@$HOST 'cmd.exe /C shutdown /f /t 20 /r'
+        else
+                echo -e "Subject: Rig ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
+        fi
+    fi
+  else
+    # Reseting counter if all of the hashes are greater than $MH_THRESHOLD
+    COUNT=0
+    echo $COUNT > $COUNTER_FILE
+  fi
+fi
+
+
+
+
+
+
+
+
+
+
