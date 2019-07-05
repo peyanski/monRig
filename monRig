@@ -1,7 +1,8 @@
 #!/bin/bash
 HOST="10.0.2.3"               # which host to monitor
 PORT="8000"                   # on which port to look for Claymore's EthMon page showing megahashes                                                                                                                                                            hashes
-PING_COUNT=1                  # how many times to ping the host
+PING_TRIES=1                  # how many times to ping the host
+PING_COUNTER_FILE=ping$HOST	  # Ping counter file name, ping + hostname by default
 COUNTER_FILE=$HOST            # counter file name, same as hostname by default
 MH_THRESHOLD="45"             # Send alert if MH drops below this point
 FAN_THRESHOLD="99"            # Send alert if FAN goes above this percentage
@@ -9,7 +10,7 @@ T_THRESHOLD="86"              # Send alert if any of the GPUs temperature pass t
 T_BURNING="91"                # Restart Host if any of the GPUs pass this point
 USERNAME="USER"               # used username for SSH connection
 EMAIL="email@icloud.com"      # to which mail to send the alerts
-ALLOWREBOOT="0"               # if 1 then auto reboot of the rig is allowed  
+ALLOWREBOOT="1"               # if 1 then auto reboot of the rig is allowed  
 MQTT_TOPIC="RIG"			  # the MQTT topic for the sonoff relay controlling the rig   
 MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server/broker                                                                                                                                                       sholds are reached
 
@@ -17,7 +18,7 @@ MQTT_BROKER="192.168.1.102"	  # ip of the MQTT server/broker                    
 pingtest(){
   for myHost in "$@"
   do
-    ping -c "$PING_COUNT" "$myHost" && return 1
+    ping -c "$PING_TRIES" "$myHost" && return 1
   done
   return 0
 }
@@ -29,14 +30,20 @@ pingtest(){
      COUNT=0
   fi
 
+# check if the PING_COUNTER_FILE exist
+  if [[ -r $PING_COUNTER_FILE ]] ; then
+     PING_COUNT=$(<$PING_COUNTER_FILE) # get the value from the file
+  else
+     PING_COUNT=0
+  fi
 
 if pingtest $HOST ; then
   # when 100% failed ping send an alert
   echo -e "Subject: Server ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
   # Increment counter and save to file
-    COUNT=`expr $COUNT + 1`
-    echo $COUNT > $COUNTER_FILE
-  if (( $COUNT == 3 )) ; then	# if the couner is equal to 3 then stop the relay using mgtt protocol
+    PING_COUNT=`expr $PING_COUNT + 1`
+    echo $PING_COUNT > $COUNTER_FILE
+  if [[ $(( $PING_COUNT % 3 )) -eq 0 ]] ; then	# if div by 3 has no remainder then stop the relay using mgtt protocol
       echo -e "Subject: Turn OFF the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
 	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
 	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 0   # OFF
@@ -44,11 +51,13 @@ if pingtest $HOST ; then
       echo -e "Subject: Turn ON the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
 	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
 	  /usr/bin/mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/POWER -m 1   # ON
-	  # Reseting counter if all of the hashes are greater than $MH_THRESHOLD
-      COUNT=0
-      echo $COUNT > $COUNTER_FILE
+
   fi 
 else	# if the host is alive
+
+  # Reseting ping counter if there is a ping to host
+  PING_COUNT=0
+  echo $PING_COUNT > $PING_COUNTER_FILE
   
   # Switches means follwing: -q = quiet; -O = output; - = standard output/console; -E = use regexp; -o = show only the matching
   getEthMh=$(wget http://$HOST:$PORT -q -O - | grep -Eo "Total Ethereum Hashrate: [0-9.]+ MH\/s" | grep -Eo "[0-9.]+")
