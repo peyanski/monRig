@@ -39,10 +39,10 @@ pingtest(){
 
 if pingtest $HOST ; then
   # when 100% failed ping send an alert
-  echo -e "Subject: Server ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
+  echo -e "Subject: ($MQTT_TOPIC) ($HOST) - ping failed at $(date)\n\n$PING_COUNT times" | /usr/sbin/ssmtp $EMAIL
   # Increment counter and save to file
     PING_COUNT=`expr $PING_COUNT + 1`
-    echo $PING_COUNT > $COUNTER_FILE
+    echo $PING_COUNT > $PING_COUNTER_FILE
   if [[ $(( $PING_COUNT % 3 )) -eq 0 ]] ; then	# if div by 3 has no remainder then stop the relay using mgtt protocol
       echo -e "Subject: Turn OFF the relay ($MQTT_TOPIC)\n\nhost - $HOST" | /usr/sbin/ssmtp $EMAIL
 	  #mosquitto_pub -h $MQTT_BROKER -t cmnd/$MQTT_TOPIC/STATUS -n		# for testing
@@ -74,15 +74,15 @@ else	# if the host is alive
   for index in "${!tArray[@]}"
   do
     if (( "${tArray[index]}" > $T_THRESHOLD )) ; then
-      echo -e "Subject: Rig ($HOST) - GPU$index OVERHEAT - ${tArray[index]}C!\n\nThreshold is ${T_THRESHOLD}C." | /usr/sbin/ssmtp $EMAIL
+      echo -e "Subject: ($MQTT_TOPIC) ($HOST) - GPU$index OVERHEAT - ${tArray[index]}C!\n\nThreshold is ${T_THRESHOLD}C." | /usr/sbin/ssmtp $EMAIL
       #IF temperature is extremely high, over $T_BURNING - restart the host
       if (( "${tArray[index]}" > $T_BURNING )) ; then
         if [ "$ALLOWREBOOT" = "1" ] ; then
-                 echo -e "Subject: Rig ($HOST) REBOOT - GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
+                 echo -e "Subject: ($MQTT_TOPIC) ($HOST) REBOOT - GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
                 # Switches means following: /C = execute command and terminate cmd.exe; /f = force; /t = delayed in seconds; /r = reboot
                  ssh -i /etc/dropbear/dropbear_rsa_host_key $USERNAME@$HOST 'cmd.exe /C shutdown /f /t 20 /r'i
         else
-                echo -e "Subject: Rig ($HOST) GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
+                echo -e "Subject: ($MQTT_TOPIC) ($HOST) GPU$index is BURNING - ${tArray[index]}C!\n\nThreshold is ${T_BURNING}C." | /usr/sbin/ssmtp $EMAIL
         fi
       fi
     fi
@@ -94,7 +94,7 @@ else	# if the host is alive
   for index in "${!lines[@]}"
   do
     if (( "${lines[index]}" > $FAN_THRESHOLD )) ; then
-      echo -e "Subject: Rig ($HOST) - GPU$index FAN - ${lines[index]}%!\n\nThreshold is ${FAN_THRESHOLD}%." | /usr/sbin/ssmtp $EMAIL
+      echo -e "Subject: ($MQTT_TOPIC) ($HOST) - GPU$index FAN - ${lines[index]}%!\n\nThreshold is ${FAN_THRESHOLD}%." | /usr/sbin/ssmtp $EMAIL
     fi
   done
 
@@ -112,18 +112,18 @@ else	# if the host is alive
     # check if we need to send alert
     if [[ $(( $COUNT % 2 )) -eq 0 ]] ; then
       # We have reached counter = 2 - we need to send alert
-      echo -e "Subject: Rig ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 2 times consequently" | /usr/sbin/ssmtp $EMAIL
+      echo -e "Subject: ($MQTT_TOPIC) ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 2 times consequently" | /usr/sbin/ssmtp $EMAIL
     fi
 
     # check if we need to reboot the rig
     if [[ $(( $COUNT % 5 )) -eq 0 ]] ; then
         if [ "$ALLOWREBOOT" = "1" ] ; then
                 # We have reached counter = 5 - we need to reboot the rig
-                echo -e "Subject: Rig ($HOST) REBOOT - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
+                echo -e "Subject: ($MQTT_TOPIC) ($HOST) REBOOT - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
                 # Switches means following: /C = execute command and terminate cmd.exe; /f = force; /t = delayed in seconds; /r = reboot
                 ssh -i /etc/dropbear/dropbear_rsa_host_key $USERNAME@$HOST 'cmd.exe /C shutdown /f /t 20 /r'
         else
-                echo -e "Subject: Rig ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
+                echo -e "Subject: ($MQTT_TOPIC) ($HOST) - Total $getEthMh MH/s found. Hashrate dropped below threshold=($MH_THRESHOLD)\n\nFor 5 times consequently" | /usr/sbin/ssmtp $EMAIL
         fi
     fi
   else
